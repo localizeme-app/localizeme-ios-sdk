@@ -1,0 +1,23 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test on macOS
+        run: swift test
+      # The package is compiled for every platform Package.swift promises.
+      - name: Build for iOS
+        run: xcodebuild build -scheme LocalizeMe -destination "generic/platform=iOS" -quiet
+      - name: Build for the iOS Simulator
+        run: xcodebuild build -scheme LocalizeMe -destination "generic/platform=iOS Simulator" -quiet
+      - name: Build for tvOS
+        run: xcodebuild build -scheme LocalizeMe -destination "generic/platform=tvOS" -quiet
+      - name: Build for watchOS
+        run: xcodebuild build -scheme LocalizeMe -destination "generic/platform=watchOS" -quiet
