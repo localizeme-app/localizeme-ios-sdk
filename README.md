@@ -531,3 +531,15 @@ the `LocalizeMeStringsCore` library, which its tests link directly. The
 LOCALIZEME_UI_TESTS=1 ./test.sh        # also render SwiftUI Text through the swizzle (needs a window server)
 ./test.sh --sanitize=thread            # the re-start race test under the thread sanitizer
 ```
+
+## License
+
+Source-available under the [PolyForm Shield License 1.0.0](LICENSE). Put
+it in any app, commercial or not, and read, change and ship it with your
+app as you need. What it does not allow is using the SDK, or anything made
+from it, to provide a product that competes with the SDK or with
+LocalizeMe. Keep the `LICENSE` file, or its link and the `Required Notice`
+line, with any copy you pass on.
+
+Versions up to and including 0.1.0-beta.2 were released under the MIT License,
+and stay available under it.
