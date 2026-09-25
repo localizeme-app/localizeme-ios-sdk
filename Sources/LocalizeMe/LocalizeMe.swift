@@ -44,9 +44,23 @@ public enum LocalizeMe {
     /// Called on the main thread whenever a new version arrives, with its
     /// version number. With `applyImmediately` off, the strings are staged;
     /// call `applyNow()` from here to swap them in and re-render.
+    ///
+    /// Computed over locked storage on purpose: an app in the Swift 6
+    /// language mode cannot touch a stored `static var` of another module,
+    /// which it sees as unprotected shared state.
     public static var onUpdate: ((Int) -> Void)? {
-        didSet { current?.onUpdate = onUpdate }
+        get {
+            lock.lock(); defer { lock.unlock() }
+            return updateHandler
+        }
+        set {
+            lock.lock(); defer { lock.unlock() }
+            updateHandler = newValue
+            client?.onUpdate = newValue
+        }
     }
+
+    private static var updateHandler: ((Int) -> Void)?
 
     /// Check for new strings now, ignoring the minimum interval.
     public static func check(completion: ((Result<LocalizeMeCheckOutcome, LocalizeMeError>) -> Void)? = nil) {
@@ -108,12 +122,19 @@ public enum LocalizeMe {
     /// The raw OTA value for a key, or `nil` when the app should use its own.
     /// Not checked against any shipped string: format it only with the
     /// arguments the dashboard's value takes.
+    ///
+    /// The property accessors the LocalizeMeStrings plugin generates call this,
+    /// so its signature is part of what generated code depends on.
     public static func string(_ key: String) -> String? {
         current?.string(forKey: key)
     }
 
     /// The OTA value for a key, or `fallback`, which also wins when the OTA
     /// value's placeholders differ from its own.
+    ///
+    /// The function accessors the LocalizeMeStrings plugin generates call this
+    /// with the shipped string, so its signature is part of what generated
+    /// code depends on.
     public static func string(_ key: String, fallback: String) -> String {
         guard let ota = current?.string(forKey: key), FormatSpecifiers.compatible(ota, fallback) else {
             return fallback
@@ -139,8 +160,9 @@ public enum LocalizeMe {
     }
 
     static func install(_ client: Client) {
-        client.onUpdate = onUpdate
+        // One critical section, so a handler set meanwhile cannot miss the client.
         lock.lock()
+        client.onUpdate = updateHandler
         self.client = client
         lock.unlock()
         client.start()

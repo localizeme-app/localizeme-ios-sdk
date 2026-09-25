@@ -2,7 +2,7 @@ import Foundation
 
 /// The three calls the SDK makes, with the headers the dashboard reads.
 final class API {
-    static let sdkVersion = "0.1.0-beta.1"
+    static let sdkVersion = "0.1.0-beta.2"
     /// The platform whose strings this SDK asks for.
     static let platform = "ios"
 

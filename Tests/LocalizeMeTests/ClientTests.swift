@@ -147,6 +147,22 @@ final class Counter {
         try? await Task.sleep(nanoseconds: 200_000_000)
     }
 
+    @Test func onUpdateReachesTheClientWhicheverIsSetFirst() async {
+        LocalizeMe.onUpdate = { _ in }
+        let first = makeClient()
+        await install(first)
+        #expect(first.onUpdate != nil)
+        LocalizeMe.onUpdate = nil
+        #expect(first.onUpdate == nil)
+        #expect(LocalizeMe.onUpdate == nil)
+
+        let second = makeClient()
+        await install(second)
+        LocalizeMe.onUpdate = { _ in }
+        #expect(second.onUpdate != nil)
+        #expect(LocalizeMe.onUpdate != nil)
+    }
+
     @Test func firstRunDownloadsTheDeviceLanguageAndAppliesIt() async throws {
         let client = makeClient()
         let outcome = await start(client)

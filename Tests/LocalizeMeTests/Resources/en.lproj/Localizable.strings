@@ -1,0 +1,8 @@
+/* The fixtures the LocalizeMeStrings plugin generates this target's L10n from. */
+
+/* The home screen's title. */
+"home.title" = "Home";
+"greeting" = "Hello %@";
+"discount" = "20% off";
+"files" = "%1$@ has %2$lld files";
+"swapped" = "%2$@ before %1$@";
