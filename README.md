@@ -1,7 +1,8 @@
 # LocalizeMe for iOS
 
-Over-the-air translations. Approved strings in the LocalizeMe dashboard reach
-the app on its next launch, without an App Store release.
+Over-the-air translations for iOS, macOS, tvOS and watchOS apps. Approved
+strings in the [LocalizeMe](https://localizeme.app/?src=github-ios-sdk) dashboard reach the app on
+its next launch, without an App Store release.
 
 - iOS 15+, tvOS 15+, watchOS 8+, macOS 12+. Swift Package Manager.
 - No dependencies. About 1,500 lines.
@@ -531,6 +532,32 @@ the `LocalizeMeStringsCore` library, which its tests link directly. The
 LOCALIZEME_UI_TESTS=1 ./test.sh        # also render SwiftUI Text through the swizzle (needs a window server)
 ./test.sh --sanitize=thread            # the re-start race test under the thread sanitizer
 ```
+
+## About LocalizeMe
+
+[LocalizeMe](https://localizeme.app/?src=github-ios-sdk) is a localization platform
+for product teams: every string your apps ship, in every language, in one
+place.
+Translators work in an editor with review statuses, screenshots that show
+where a string appears, key groups and the full history of every change.
+
+- **Unlimited keys and languages on every plan, the free one included.** Paid
+  plans are one flat price per workspace, not per seat or per string.
+- **The files every platform uses:** Android `strings.xml`, iOS `.xcstrings`
+  and `.strings`, Flutter ARB, JSON, YAML, CSV, XLIFF 1.2, gettext PO and Java
+  `.properties`, with a separate value per platform where iOS and Android need
+  to differ.
+- **Strings over the air:** this SDK and the
+  [Android SDK](https://github.com/localizeme-app/localizeme-android-sdk)
+  update an app's text without a store release.
+- **For developers and their agents:** the
+  [CLI](https://github.com/localizeme-app/localizeme-cli)
+  for builds and CI, a REST API, and an MCP server that Claude, Cursor and
+  other coding agents can work with.
+
+[Start free](https://localizeme.app/register?src=github-ios-sdk), no credit card needed ·
+[Pricing](https://localizeme.app/pricing?src=github-ios-sdk) ·
+[Developers](https://localizeme.app/developers?src=github-ios-sdk)
 
 ## License
 
