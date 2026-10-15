@@ -10,9 +10,22 @@ final class Reporter {
     private var errors: [[String: String]] = []
     private var seenErrorTypes: Set<String> = []
     private var missing: [String: [String: String]] = [:]
+    private var enabled = true
+
+    /// Off below full consent: nothing is recorded, and what was buffered is dropped.
+    func setEnabled(_ on: Bool) {
+        lock.lock(); defer { lock.unlock() }
+        enabled = on
+        if !on {
+            errors = []
+            seenErrorTypes = []
+            missing = [:]
+        }
+    }
 
     func recordError(_ error: LocalizeMeError) {
         lock.lock(); defer { lock.unlock() }
+        guard enabled else { return }
         // One report per type per launch: a failing cache read would otherwise
         // report once per string lookup. A placeholder mismatch is about one
         // key, so those count per key.
@@ -24,7 +37,7 @@ final class Reporter {
 
     func recordMissingKey(_ key: String, language: String?) {
         lock.lock(); defer { lock.unlock() }
-        guard missing.count < Reporter.maxMissingKeysPerLaunch else { return }
+        guard enabled, missing.count < Reporter.maxMissingKeysPerLaunch else { return }
         let id = "\(language ?? "")\u{0}\(key)"
         if missing[id] == nil {
             var entry = ["key": key]
@@ -44,6 +57,7 @@ final class Reporter {
 
     func restore(errors: [[String: String]], missingKeys: [[String: String]]) {
         lock.lock(); defer { lock.unlock() }
+        guard enabled else { return }
         self.errors = errors + self.errors
         for entry in missingKeys {
             let id = "\(entry["language"] ?? "")\u{0}\(entry["key"] ?? "")"

@@ -12,15 +12,14 @@ its next launch, without an App Store release.
 ## Install
 
 Xcode → File → Add Package Dependencies →
-`https://github.com/localizeme-app/localizeme-ios-sdk`, product `LocalizeMe`.
-While the SDK is in beta, choose **Exact Version** `0.1.0-beta.2`: Swift
-Package Manager never picks a pre-release on its own.
+`https://github.com/localizeme-app/localizeme-ios-sdk`, product `LocalizeMe`,
+with **Up to Next Major Version** from `1.0.0`.
 
 Or in `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/localizeme-app/localizeme-ios-sdk", exact: "0.1.0-beta.2"),
+    .package(url: "https://github.com/localizeme-app/localizeme-ios-sdk", from: "1.0.0"),
 ],
 targets: [
     .target(name: "MyApp", dependencies: [
@@ -427,6 +426,43 @@ config.debugLogging = true            // DEBUG builds only
 LocalizeMe.start(config)
 ```
 
+### Consent
+
+Apps that ask the user first (a consent banner or a CMP such as Usercentrics,
+OneTrust or Didomi) tell the SDK what it may do:
+
+| Level | Network | Kept on the device | Sent |
+|---|---|---|---|
+| `.full` (default) | yes | strings, a random install id | SDK key; SDK, app and OS version; language; install id; errors and missing keys |
+| `.stringsOnly` | yes | strings | SDK key and SDK version only |
+| `.off` | none | strings already downloaded | nothing |
+
+Going below `.full` deletes the install id and drops anything waiting to be
+reported; granting again makes a new id. Leaving `.off` checks straight away.
+Already downloaded strings keep showing at every level, falling back to the
+shipped ones.
+
+The level is not remembered between launches, because the consent tool is the
+record. Start at the level it last gave, or at `.off` until it answers, and
+call `setConsent` on every change. A `setConsent` before `start` is kept.
+
+```swift
+var config = LocalizeMeConfiguration(sdkKey: "lzs_…")
+config.consent = .off
+LocalizeMe.start(config)
+
+// Usercentrics: LocalizeMe is a service in your configuration; use its template id.
+func applyConsents(_ consents: [UsercentricsServiceConsent]) {
+    let granted = consents.first { $0.templateId == "YOUR_LOCALIZEME_TEMPLATE_ID" }?.status ?? false
+    LocalizeMe.setConsent(granted ? .full : .stringsOnly)
+}
+UsercentricsCore.isReady { status in applyConsents(status.consents) } onFailure: { _ in }
+UsercentricsEvent.shared.onConsentUpdated { _ in applyConsents(UsercentricsCore.shared.getConsents()) }
+```
+
+Map a refusal to `.off` instead if a refused service must not reach the
+network at all.
+
 ### Which language
 
 The SDK matches the localization the app is actually rendering
@@ -500,6 +536,19 @@ LocalizeMe.setLanguage("lt")                         // in-app language switch
 LocalizeMe.version                                   // 0 until something has been downloaded
 ```
 
+### Releases
+
+Apps get releases: numbered snapshots of the project's approved strings,
+published from the Mobile SDK tab, by hand or automatically as strings are
+approved. The version the SDK logs and reports (`LocalizeMe.version`) is the
+release number, and 0 means no release covers this app yet.
+
+A release can be limited to apps from a minimum version. The SDK sends the
+app's version with every check, as `CFBundleShortVersionString` plus the
+build number, and gets the newest release whose minimum it meets. An older
+app keeps the last release that covers it, or its own shipped strings when
+none does. Nothing to configure in the app.
+
 ## How it works
 
 1. On launch the SDK loads the last bundle from `Library/Caches/LocalizeMe/` and
@@ -512,9 +561,10 @@ LocalizeMe.version                                   // 0 until something has be
 3. The new snapshot is staged (or applied, see above). Old bundle files are
    pruned.
 
-The SDK also sends an install id it made up (a random UUID kept in
-UserDefaults), the app, SDK and OS versions, and any errors it hit. Nothing
-that identifies a person or a device.
+With full consent the SDK also sends an install id it made up (a random UUID
+kept in UserDefaults), the app, SDK and OS versions, and any errors it hit.
+Nothing that identifies a person or a device. Below full consent it sends none
+of that; see [Consent](#consent).
 
 ## Building and testing
 

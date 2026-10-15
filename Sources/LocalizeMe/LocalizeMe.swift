@@ -37,6 +37,11 @@ public enum LocalizeMe {
     }
 
     public static func start(_ configuration: LocalizeMeConfiguration) {
+        var configuration = configuration
+        lock.lock()
+        if let pendingConsent { configuration.consent = pendingConsent }
+        pendingConsent = nil
+        lock.unlock()
         let client = Client(configuration: configuration)
         install(client)
     }
@@ -83,6 +88,31 @@ public enum LocalizeMe {
     public static var hasStagedUpdate: Bool {
         current?.hasStagedUpdate ?? false
     }
+
+    /// What the SDK may do, for apps that ask the user first. Call it whenever
+    /// the consent tool reports a change; it applies from the next request.
+    /// Called before `start`, it is kept and wins over the configuration's
+    /// `consent`.
+    ///
+    /// ```swift
+    /// LocalizeMe.setConsent(granted ? .full : .stringsOnly)
+    /// ```
+    public static func setConsent(_ level: LocalizeMeConsent) {
+        lock.lock()
+        let client = self.client
+        if client == nil { pendingConsent = level }
+        lock.unlock()
+        client?.setConsent(level)
+    }
+
+    /// The consent the SDK is working under: the last `setConsent`, else the
+    /// configuration's.
+    public static var consent: LocalizeMeConsent {
+        lock.lock(); defer { lock.unlock() }
+        return client?.consent ?? pendingConsent ?? .full
+    }
+
+    private static var pendingConsent: LocalizeMeConsent?
 
     /// Show this language instead of the one the app is showing. `nil` follows
     /// the app again.
@@ -164,13 +194,18 @@ public enum LocalizeMe {
         lock.lock()
         client.onUpdate = updateHandler
         self.client = client
+        // A setConsent that arrived after start() read the pending level.
+        let late = pendingConsent
+        pendingConsent = nil
         lock.unlock()
+        if let late { client.setConsent(late) }
         client.start()
     }
 
     static func reset() {
         lock.lock()
         client = nil
+        pendingConsent = nil
         lock.unlock()
     }
 }

@@ -16,4 +16,9 @@ enum InstallID {
         defaults.set(fresh, forKey: key)
         return fresh
     }
+
+    /// Forgets the id, for when consent is withdrawn. A later grant makes a new one.
+    static func remove(defaults: UserDefaults = .standard) {
+        defaults.removeObject(forKey: key)
+    }
 }

@@ -2,21 +2,47 @@ import Foundation
 
 /// The three calls the SDK makes, with the headers the dashboard reads.
 final class API {
-    static let sdkVersion = "0.1.0-beta.2"
+    static let sdkVersion = "1.0.0"
     /// The platform whose strings this SDK asks for.
     static let platform = "ios"
 
     let configuration: LocalizeMeConfiguration
     let session: URLSession
-    let installID: String
     let appVersion: String
     let osVersion: String
     var language: String?
+    /// Below `.full`, requests say nothing about the install. Set from any
+    /// thread, so a lowered level holds for every request built after it.
+    var consent: LocalizeMeConsent {
+        get { consentLock.lock(); defer { consentLock.unlock() }; return consentLevel }
+        set { consentLock.lock(); consentLevel = newValue; consentLock.unlock() }
+    }
 
-    init(configuration: LocalizeMeConfiguration, session: URLSession, installID: String) {
+    private let consentLock = NSLock()
+    private var consentLevel: LocalizeMeConsent
+
+    private let makeInstallID: () -> String
+    private var cachedInstallID: String?
+
+    /// The install id, read (and on first use created) only when a request
+    /// with full consent needs it.
+    var installID: String {
+        if let cachedInstallID { return cachedInstallID }
+        let id = makeInstallID()
+        cachedInstallID = id
+        return id
+    }
+
+    /// Drops the id held in memory, after the stored one is deleted.
+    func forgetInstallID() {
+        cachedInstallID = nil
+    }
+
+    init(configuration: LocalizeMeConfiguration, session: URLSession, installID: @escaping () -> String) {
         self.configuration = configuration
         self.session = session
-        self.installID = installID
+        self.makeInstallID = installID
+        self.consentLevel = configuration.consent
         let info = Bundle.main.infoDictionary ?? [:]
         let short = info["CFBundleShortVersionString"] as? String ?? ""
         let build = info["CFBundleVersion"] as? String ?? ""
@@ -113,12 +139,14 @@ final class API {
     private func makeRequest(url: URL) -> URLRequest {
         var request = URLRequest(url: url)
         request.setValue("Bearer \(configuration.sdkKey)", forHTTPHeaderField: "Authorization")
-        request.setValue(installID, forHTTPHeaderField: "X-LocalizeMe-Install")
-        request.setValue(appVersion, forHTTPHeaderField: "X-LocalizeMe-App")
         request.setValue(API.sdkVersion, forHTTPHeaderField: "X-LocalizeMe-SDK")
-        request.setValue(osVersion, forHTTPHeaderField: "X-LocalizeMe-OS")
-        if let language {
-            request.setValue(language, forHTTPHeaderField: "X-LocalizeMe-Language")
+        if consent == .full {
+            request.setValue(installID, forHTTPHeaderField: "X-LocalizeMe-Install")
+            request.setValue(appVersion, forHTTPHeaderField: "X-LocalizeMe-App")
+            request.setValue(osVersion, forHTTPHeaderField: "X-LocalizeMe-OS")
+            if let language {
+                request.setValue(language, forHTTPHeaderField: "X-LocalizeMe-Language")
+            }
         }
         request.setValue("localizeme-ios/\(API.sdkVersion)", forHTTPHeaderField: "User-Agent")
         request.cachePolicy = .reloadIgnoringLocalCacheData

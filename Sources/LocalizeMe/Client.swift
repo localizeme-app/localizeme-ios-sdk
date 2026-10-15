@@ -26,6 +26,11 @@ final class Client {
     /// `table\0key` → whether the OTA value may replace the shipped string.
     private var safe: [String: Bool] = [:]
     private var onUpdateHandler: ((Int) -> Void)?
+    private var consentLevel: LocalizeMeConsent
+    /// Set once `start()` has done its work off the queue; until then a
+    /// consent change leaves the first check to `start()`.
+    private var started = false
+    private let defaults: UserDefaults
 
     private(set) var current: Snapshot
     private(set) var staged: Snapshot?
@@ -46,14 +51,27 @@ final class Client {
     /// is rendering, then the device's own list.
     var preferredLanguages: () -> [String] = { Bundle.main.preferredLocalizations + Locale.preferredLanguages }
 
-    init(configuration: LocalizeMeConfiguration, session: URLSession = Client.defaultSession(), store: Store? = nil, installID: String? = nil) {
+    init(
+        configuration: LocalizeMeConfiguration, session: URLSession = Client.defaultSession(), store: Store? = nil,
+        installID: String? = nil, defaults: UserDefaults = .standard
+    ) {
         self.configuration = configuration
         let prefix = String(configuration.sdkKey.prefix(10))
         self.store = store ?? Store(root: Store.defaultRoot(keyPrefix: prefix))
-        self.api = API(configuration: configuration, session: session, installID: installID ?? InstallID.current())
+        self.defaults = defaults
+        self.api = API(configuration: configuration, session: session) {
+            installID ?? InstallID.current(defaults: defaults)
+        }
+        self.consentLevel = configuration.consent
         self.current = self.store.loadSnapshot(named: "current") ?? .empty
         self.staged = self.store.loadSnapshot(named: "staged")
         queue.setSpecific(key: Client.queueKey, value: true)
+        if configuration.consent < .full {
+            reporter.setEnabled(false)
+            // An id from an earlier launch with full consent goes, on the
+            // queue rather than the launching thread, and before any request.
+            queue.async { InstallID.remove(defaults: defaults) }
+        }
     }
 
     /// No URL cache: every answer is a 304 or content the SDK stores itself.
@@ -84,6 +102,10 @@ final class Client {
             reporter.recordError(LocalizeMeError(kind: .storage, message: "swizzle_failed"))
             log("could not intercept Bundle lookups; use LocalizeMe.localizedString(forKey:)")
         }
+
+        lock.lock()
+        started = true
+        lock.unlock()
 
         #if canImport(UIKit) && !os(watchOS)
         if configuration.checkOnForeground {
@@ -119,6 +141,39 @@ final class Client {
     var language: String? {
         lock.lock(); defer { lock.unlock() }
         return liveLanguage
+    }
+
+    var consent: LocalizeMeConsent {
+        lock.lock(); defer { lock.unlock() }
+        return consentLevel
+    }
+
+    /// Changes what the SDK may do from the next request on. Going below
+    /// `.full` drops buffered reports at once and deletes the install id;
+    /// leaving `.off` checks straight away, since checks were skipped. Before
+    /// `start()` it only records the level: the check `start()` makes uses it.
+    func setConsent(_ level: LocalizeMeConsent) {
+        // One critical section, so two calls racing cannot leave the level
+        // and what the reporter and requests do disagreeing.
+        lock.lock()
+        let previous = consentLevel
+        consentLevel = level
+        reporter.setEnabled(level == .full)
+        api.consent = level
+        let checkNow = started && previous == .off && level > .off
+        lock.unlock()
+        queue.async {
+            if level < .full {
+                // On the queue, where the id is created, so a request being
+                // built cannot make it again after this.
+                InstallID.remove(defaults: self.defaults)
+                self.api.forgetInstallID()
+            }
+            self.log("consent \(level.rawValue)")
+            if checkNow {
+                self.check(force: true, completion: nil)
+            }
+        }
     }
 
     var hasStagedUpdate: Bool {
@@ -228,6 +283,10 @@ final class Client {
         queue.async {
             if let completion { self.pendingCompletions.append(completion) }
             if self.checking { return }
+            if self.consent == .off {
+                self.finish(.failure(LocalizeMeError(kind: .consentOff, message: "consent is off")))
+                return
+            }
             if !force, let last = self.lastCheck,
                Date().timeIntervalSince(last) < self.configuration.minimumCheckInterval {
                 self.finish(.success(.throttled))
@@ -242,6 +301,11 @@ final class Client {
     }
 
     private func handleManifest(_ result: Result<API.ManifestResult, LocalizeMeError>) {
+        if consent == .off {
+            // Turned off while the manifest was on its way: download nothing.
+            finish(.failure(LocalizeMeError(kind: .consentOff, message: "consent is off")))
+            return
+        }
         switch result {
         case .failure(let error):
             reporter.recordError(error)
@@ -429,7 +493,7 @@ final class Client {
     }
 
     private func sendReports() {
-        guard !reporter.isEmpty else { return }
+        guard consent == .full, !reporter.isEmpty else { return }
         let (errors, missing) = reporter.drain()
         api.report(errors: errors, missingKeys: missing) { ok in
             if !ok {

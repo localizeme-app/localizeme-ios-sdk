@@ -90,8 +90,10 @@ final class Counter {
     let server = FakeServer()
     let root: URL
     let run = UUID().uuidString
+    let defaults: UserDefaults
 
     init() {
+        defaults = UserDefaults(suiteName: "localizeme-test-\(run)")!
         root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let server = self.server
         MockURLProtocol.setHandler({ server.handle($0) }, for: run)
@@ -101,6 +103,7 @@ final class Counter {
 
     deinit {
         MockURLProtocol.retire(run)
+        defaults.removePersistentDomain(forName: "localizeme-test-\(run)")
         try? FileManager.default.removeItem(at: root)
         LocalizeMe.reset()
     }
@@ -108,7 +111,8 @@ final class Counter {
     var requests: [URLRequest] { MockURLProtocol.requests(for: run) }
 
     func makeClient(
-        applyImmediately: Bool = false, languages: [String] = ["de-DE"], intercept: Bool = false, reportMissingKeys: Bool = false
+        applyImmediately: Bool = false, languages: [String] = ["de-DE"], intercept: Bool = false, reportMissingKeys: Bool = false,
+        consent: LocalizeMeConsent = .full, installID: String? = "install-1"
     ) -> Client {
         var configuration = LocalizeMeConfiguration(sdkKey: "lzs_test_key_1234")
         configuration.baseURL = URL(string: "https://api.test")!
@@ -116,9 +120,10 @@ final class Counter {
         configuration.interceptBundleLookups = intercept
         configuration.reportMissingKeys = reportMissingKeys
         configuration.checkOnForeground = false
+        configuration.consent = consent
         let client = Client(
             configuration: configuration, session: MockURLProtocol.session(for: run),
-            store: Store(root: root), installID: "install-1"
+            store: Store(root: root), installID: installID, defaults: defaults
         )
         client.preferredLanguages = { languages }
         return client
@@ -456,6 +461,158 @@ final class Counter {
         #expect(client.reporter.isEmpty)
         // Other bundles are left alone.
         #expect(Bundle(for: ClientTests.self).localizedString(forKey: "home.title", value: nil, table: nil) == "home.title")
+    }
+
+    // MARK: Consent
+
+    static let installHeaders = ["X-LocalizeMe-Install", "X-LocalizeMe-App", "X-LocalizeMe-OS", "X-LocalizeMe-Language"]
+
+    @Test func stringsOnlyDownloadsWithoutSayingAnythingAboutTheInstall() async throws {
+        let client = makeClient(consent: .stringsOnly, installID: nil)
+        let outcome = await start(client)
+        #expect(try outcome.get() == .applied(version: 1))
+        #expect(client.string(forKey: "home.title") == "Startseite")
+        // A second check runs with a language live, so it would carry one.
+        _ = await check(client)
+        #expect(requests.count >= 3)
+        for request in requests {
+            for header in ClientTests.installHeaders {
+                #expect(request.value(forHTTPHeaderField: header) == nil, "\(header) on \(request.url!.path)")
+            }
+            #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer lzs_test_key_1234")
+            #expect(request.value(forHTTPHeaderField: "X-LocalizeMe-SDK") == API.sdkVersion)
+        }
+        #expect(defaults.string(forKey: InstallID.key) == nil)
+    }
+
+    @Test func stringsOnlyReportsNothing() async {
+        server.corruptBundles = true
+        let client = makeClient(reportMissingKeys: true, consent: .stringsOnly)
+        await start(client)
+        client.reporter.recordMissingKey("settings.title", language: "de")
+        #expect(client.reporter.isEmpty)
+        await settle()
+        #expect(server.reports.isEmpty)
+        #expect(!requests.contains { $0.url!.path.hasSuffix("/report") })
+    }
+
+    @Test func offMakesNoRequestsAndKeepsTheCachedStrings() async {
+        await start(makeClient())
+        let before = requests.count
+        let client = makeClient(consent: .off)
+        let outcome = await start(client)
+        if case .failure(let error) = outcome {
+            #expect(error.kind == .consentOff)
+        } else {
+            Issue.record("expected consent_off")
+        }
+        #expect(client.string(forKey: "home.title") == "Startseite")
+        await settle()
+        #expect(requests.count == before)
+    }
+
+    @Test func leavingOffChecksStraightAway() async {
+        let client = makeClient(consent: .off)
+        await start(client)
+        #expect(requests.isEmpty)
+        let updated: Int = await withCheckedContinuation { continuation in
+            client.onUpdate = { continuation.resume(returning: $0) }
+            client.setConsent(.stringsOnly)
+        }
+        #expect(updated == 1)
+        #expect(client.string(forKey: "home.title") == "Startseite")
+        #expect(requests.allSatisfy { $0.value(forHTTPHeaderField: "X-LocalizeMe-Install") == nil })
+    }
+
+    @Test func withdrawingConsentDeletesTheInstallID() async throws {
+        let client = makeClient(installID: nil)
+        await start(client)
+        let id = try #require(defaults.string(forKey: InstallID.key))
+        let first = try #require(requests.first { $0.url!.path.hasSuffix("/manifest") })
+        #expect(first.value(forHTTPHeaderField: "X-LocalizeMe-Install") == id)
+
+        client.reporter.recordMissingKey("settings.title", language: "de")
+        client.setConsent(.stringsOnly)
+        #expect(client.reporter.isEmpty)
+        _ = await check(client)
+        #expect(defaults.string(forKey: InstallID.key) == nil)
+        let last = try #require(requests.last { $0.url!.path.hasSuffix("/manifest") })
+        #expect(last.value(forHTTPHeaderField: "X-LocalizeMe-Install") == nil)
+
+        // Granting again makes a new id rather than bringing the old one back.
+        client.setConsent(.full)
+        _ = await check(client)
+        let again = try #require(requests.last { $0.url!.path.hasSuffix("/manifest") })
+        let fresh = try #require(again.value(forHTTPHeaderField: "X-LocalizeMe-Install"))
+        #expect(fresh != id)
+        #expect(defaults.string(forKey: InstallID.key) == fresh)
+    }
+
+    @Test func startingBelowFullDeletesAnEarlierInstallID() {
+        defaults.set("old-id", forKey: InstallID.key)
+        let client = makeClient(consent: .stringsOnly, installID: nil)
+        _ = client.hasStagedUpdate  // waits for the queue
+        #expect(defaults.string(forKey: InstallID.key) == nil)
+    }
+
+    @Test func consentChangedBeforeStartLeavesTheFirstCheckToStart() async throws {
+        let client = makeClient(consent: .off)
+        client.setConsent(.full)
+        _ = client.hasStagedUpdate  // waits for the queue
+        await settle()
+        #expect(requests.isEmpty)
+        let outcome = await start(client)
+        #expect(try outcome.get() == .applied(version: 1))
+        let manifest = try #require(requests.first { $0.url!.path.hasSuffix("/manifest") })
+        #expect(manifest.value(forHTTPHeaderField: "X-LocalizeMe-Install") == "install-1")
+    }
+
+    @Test func consentSetBeforeInstallReachesTheClient() async {
+        LocalizeMe.setConsent(.stringsOnly)
+        let client = makeClient(installID: nil)
+        await install(client)
+        #expect(client.consent == .stringsOnly)
+        #expect(LocalizeMe.consent == .stringsOnly)
+        #expect(LocalizeMe.string("home.title") == "Startseite")
+        #expect(!requests.isEmpty)
+        #expect(requests.allSatisfy { $0.value(forHTTPHeaderField: "X-LocalizeMe-Install") == nil })
+        #expect(defaults.string(forKey: InstallID.key) == nil)
+    }
+
+    @Test func nothingIsReportedBelowFullEvenIfSomethingWasBuffered() async {
+        let client = makeClient()
+        await start(client)
+        client.setConsent(.stringsOnly)
+        // Recorded behind the reporter's back, as a racing call could leave it.
+        client.reporter.setEnabled(true)
+        client.reporter.recordMissingKey("settings.title", language: "de")
+        _ = await check(client)
+        await settle()
+        #expect(server.reports.isEmpty)
+    }
+
+    @Test func consentSetBeforeStartIsUsedByStart() {
+        LocalizeMe.setConsent(.off)
+        var configuration = LocalizeMeConfiguration(sdkKey: "lzs_consent_\(run)")
+        configuration.baseURL = URL(string: "https://api.test")!
+        configuration.interceptBundleLookups = false
+        configuration.checkOnForeground = false
+        LocalizeMe.start(configuration)
+        #expect(LocalizeMe.current?.consent == .off)
+        #expect(LocalizeMe.current?.configuration.consent == .off)
+    }
+
+    @Test func consentSetBeforeStartIsKept() {
+        #expect(LocalizeMe.consent == .full)
+        LocalizeMe.setConsent(.off)
+        #expect(LocalizeMe.consent == .off)
+        LocalizeMe.reset()
+        #expect(LocalizeMe.consent == .full)
+    }
+
+    @Test func consentLevelsAreOrdered() {
+        #expect(LocalizeMeConsent.off < .stringsOnly)
+        #expect(LocalizeMeConsent.stringsOnly < .full)
     }
 
     /// Run under `./test.sh --sanitize=thread`: lookups on one thread while the

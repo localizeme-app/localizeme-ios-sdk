@@ -82,6 +82,8 @@ public struct LocalizeMeError: Error, Equatable, CustomStringConvertible {
         /// An OTA value's placeholders differ from the shipped string's; the
         /// message names the key. The shipped string is used instead.
         case formatMismatch = "format_mismatch"
+        /// The check did not run because consent is `.off`.
+        case consentOff = "consent_off"
     }
 
     public let kind: Kind
