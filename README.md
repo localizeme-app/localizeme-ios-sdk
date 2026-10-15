@@ -609,6 +609,9 @@ where a string appears, key groups and the full history of every change.
 [Pricing](https://localizeme.app/pricing?src=github-ios-sdk) ·
 [Developers](https://localizeme.app/developers?src=github-ios-sdk)
 
+Guides: [iOS String Catalogs](https://localizeme.app/guides/ios-xcstrings?src=github-ios-sdk) ·
+[All localization guides](https://localizeme.app/guides?src=github-ios-sdk)
+
 ## License
 
 Source-available under the [PolyForm Shield License 1.0.0](LICENSE). Put
