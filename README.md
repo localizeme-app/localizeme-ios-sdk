@@ -463,6 +463,9 @@ UsercentricsEvent.shared.onConsentUpdated { _ in applyConsents(UsercentricsCore.
 Map a refusal to `.off` instead if a refused service must not reach the
 network at all.
 
+For your privacy policy and consent tool, [SDK data and consent](https://localizeme.app/sdk-data?src=github-ios-sdk)
+lists everything the SDK stores and sends at each level.
+
 ### Which language
 
 The SDK matches the localization the app is actually rendering
