@@ -51,10 +51,10 @@ public struct LocalizeMeConfiguration {
     /// `Bundle.main.localizedAttributedString(forKey:value:table:)` and the
     /// SwiftUI views that take a `LocalizedStringKey` (`Text("key")`,
     /// `Text("key \(n)")`, `Button("key")`, `Label`, `.navigationTitle`) unless
-    /// they set `.environment(\.locale, …)`. `String(localized:)`,
-    /// `LocalizedStringResource`, `AttributedString(localized:)`, other bundles
-    /// and `.stringsdict` plurals use private Foundation entry points and are
-    /// left alone; call `LocalizeMe.localizedString(forKey:)` or
+    /// they set `.environment(\.locale, …)`, plurals included.
+    /// `String(localized:)`, `LocalizedStringResource`,
+    /// `AttributedString(localized:)` and other bundles use private Foundation
+    /// entry points and are left alone; call `LocalizeMe.localizedString(forKey:)` or
     /// `LocalizeMe.text(_:)` there. Turn off to use only those helpers.
     public var interceptBundleLookups = true
     /// Tell the dashboard about keys the app asked for that neither the OTA

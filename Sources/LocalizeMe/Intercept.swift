@@ -6,7 +6,9 @@ import Foundation
 enum Intercept {
     /// The OTA value for a `Bundle.main` lookup, or nil to use the shipped one.
     static func string(bundle: Bundle, key: String, value: String?, table: String?) -> String? {
-        candidate(bundle: bundle, key: key, table: table)?.value
+        guard let client = client(for: bundle) else { return nil }
+        if let plural = client.pluralString(forKey: key, table: table) { return plural }
+        return candidate(client: client, key: key, table: table)?.value
     }
 
     /// The OTA value for an attributed `Bundle.main` lookup, parsed the way
@@ -17,7 +19,10 @@ enum Intercept {
     /// its `value:`: Foundation caches attributed results per key, and would
     /// keep answering with the first value it saw.
     static func attributed(bundle: Bundle, key: String, value: String?, table: String?) -> NSAttributedString? {
-        guard let hit = candidate(bundle: bundle, key: key, table: table) else { return nil }
+        guard let client = client(for: bundle) else { return nil }
+        // Foundation builds a plural's attributed string itself, rules and all.
+        if let plural = client.pluralAttributedString(forKey: key, table: table) { return plural }
+        guard let hit = candidate(client: client, key: key, table: table) else { return nil }
         let options = AttributedString.MarkdownParsingOptions(
             allowsExtendedAttributes: true,
             interpretedSyntax: .inlineOnlyPreservingWhitespace,
@@ -33,19 +38,24 @@ enum Intercept {
     /// Called with what the original implementation answered. A key that came
     /// back as itself, with no default value to explain it, is one nobody has.
     static func noteMiss(bundle: Bundle, key: String, value: String?, shipped: String) {
-        guard shipped == key, (value ?? "").isEmpty, bundle === Bundle.main,
-              let client = LocalizeMe.current else { return }
+        guard shipped == key, (value ?? "").isEmpty,
+              let client = LocalizeMe.current, bundle === client.appBundle else { return }
         client.noteMissing(key)
     }
 
+    /// The client, when it answers lookups on `bundle`: the app's bundle
+    /// (`Bundle.main`) with interception on.
+    private static func client(for bundle: Bundle) -> Client? {
+        guard let client = LocalizeMe.current, bundle === client.appBundle,
+              client.configuration.interceptBundleLookups else { return nil }
+        return client
+    }
+
     /// The client and its OTA value for `key`, when there is one the app may
-    /// show: the lookup is on `Bundle.main`, interception is on, the live
-    /// strings have the key, and its placeholders match the shipped string's.
-    private static func candidate(bundle: Bundle, key: String, table: String?) -> (client: Client, value: String)? {
-        guard bundle === Bundle.main,
-              let client = LocalizeMe.current,
-              client.configuration.interceptBundleLookups,
-              let value = client.string(forKey: key),
+    /// show: the live strings have the key, and its placeholders match the
+    /// shipped string's.
+    private static func candidate(client: Client, key: String, table: String?) -> (client: Client, value: String)? {
+        guard let value = client.string(forKey: key),
               client.isSafe(key: key, table: table, ota: value)
         else { return nil }
         return (client, value)

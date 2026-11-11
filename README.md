@@ -84,6 +84,8 @@ Intercepted automatically:
 - SwiftUI views that take a `LocalizedStringKey`: `Text("key")`,
   `Text("key \(n)")`, `Button("key")`, `Label`, `.navigationTitle("key")`
   and so on, unless the view sets `.environment(\.locale, …)`
+- plurals, from a string catalog's plural variations or a `.stringsdict`,
+  through any of the above: see [Plurals](#plurals)
 
 Not intercepted, use `LocalizeMe.localizedString(forKey:)` or
 `LocalizeMe.text(_:)` instead:
@@ -93,7 +95,6 @@ Not intercepted, use `LocalizeMe.localizedString(forKey:)` or
 - `AttributedString(localized:)`
 - `Text` with an explicit locale (`.environment(\.locale, …)`)
 - strings in other bundles, including `Bundle.module`
-- `.stringsdict` plural rules
 
 These use private Foundation entry points. Swizzling those would be an App
 Store rejection risk and could break with any OS update, so the SDK stays on
@@ -108,6 +109,38 @@ LocalizeMe.text("home.title")                                          // SwiftU
 Both return the approved OTA value when there is one, otherwise exactly what
 `NSLocalizedString` would have returned.
 The typed accessors below do the same without spelling out keys.
+
+### Plurals
+
+A plural lives in the dashboard as one key per form, named after the catalog
+key: `cart.items %lld_one`, `cart.items %lld_other`, plus `_few`, `_many`,
+`_two` or `_zero` where the language has them. Each form is the whole string
+for that case, `%lld prekės`, not just the word that changes.
+
+The SDK lets Foundation keep choosing the form. When new strings are applied
+it finds the keys the app ships as plurals in its compiled `.stringsdict`
+files (Xcode compiles a string catalog's plural variations to those), writes
+copies of them with the approved forms into a bundle it keeps in Application
+Support, and answers lookups of those keys from there. So
+`String.localizedStringWithFormat(NSLocalizedString("cart.items %lld", comment: ""), n)`,
+`Text("cart.items \(n)")`, `L10n.cartItems(n)` and
+`LocalizeMe.localizedString(forKey: "cart.items %lld", arguments: n)` all show
+the new forms, with Foundation's plural rules for the locale they format in.
+
+A plural is served whole or not at all; the app never shows a mix of new and
+shipped forms. It keeps its shipped strings when:
+
+- a form the language needs is not approved (Lithuanian needs `one`, `few`
+  and `other` for whole numbers, Russian `one`, `few`, `many` and `other`,
+  and every language `other`; when the app ships the same language, every
+  form it ships is needed too)
+- a form takes other arguments than the shipped forms do. A form may leave
+  the number out ("One item"), but may not change a `%lld` to a `%@`
+- the entry has more than one plural variable (`%#@files@ in %#@folders@`),
+  or placeholders outside its variable
+
+`String(localized:)` and `LocalizedStringResource` stay out of reach, as they
+do for plain strings.
 
 ### Typed accessors
 

@@ -7,12 +7,13 @@ import ObjectiveC
 /// views that take a `LocalizedStringKey` (`Text("key")`, `Text("key \(n)")`,
 /// `Button("key")`, `Label`, `.navigationTitle`) pick them up without a code
 /// change. SwiftUI formats the arguments itself from what the lookup returns.
+/// Plurals are answered from the SDK's own `.stringsdict` bundle (`Plurals`).
 ///
 /// Only public API is exchanged. `String(localized:)`, `LocalizedStringResource`,
-/// `AttributedString(localized:)`, a `Text` given an explicit locale, other
-/// bundles and `.stringsdict` plurals go through private Foundation entry
-/// points and keep their shipped strings; `LocalizeMe.localizedString(forKey:)`
-/// and `LocalizeMe.text(_:)` cover them.
+/// `AttributedString(localized:)`, a `Text` given an explicit locale and other
+/// bundles go through private Foundation entry points and keep their shipped
+/// strings; `LocalizeMe.localizedString(forKey:)` and `LocalizeMe.text(_:)`
+/// cover them.
 enum Swizzle {
     private static let lock = NSLock()
     private static var installed = false

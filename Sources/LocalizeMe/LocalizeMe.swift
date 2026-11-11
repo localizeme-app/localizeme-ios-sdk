@@ -14,14 +14,15 @@ import SwiftUI
 /// views that take a `LocalizedStringKey` (`Text("key")`, `Text("key \(n)")`,
 /// `Button("key")`, `Label`, `.navigationTitle`) return the latest approved
 /// strings for the language the app is showing, falling back to what the app
-/// shipped with.
+/// shipped with. Plurals included: their approved forms are served through a
+/// `.stringsdict` the SDK writes, so Foundation still picks the form.
 ///
 /// Not intercepted, because they use private Foundation entry points and the
 /// SDK only touches public API: `String(localized:)`, `LocalizedStringResource`
 /// and `Text(LocalizedStringResource)`, `AttributedString(localized:)`, a
 /// `Text` that sets `.environment(\.locale, …)`, strings in other bundles
-/// (including `Bundle.module`) and `.stringsdict` plural rules. Use
-/// `localizedString(forKey:table:)` or `text(_:table:)` there.
+/// (including `Bundle.module`). Use `localizedString(forKey:table:)` or
+/// `text(_:table:)` there.
 ///
 /// An OTA value whose placeholders differ from the shipped string's is never
 /// shown. The SDK checks for changes on launch and when the app returns to
@@ -127,12 +128,15 @@ public enum LocalizeMe {
     /// string from `Bundle.main`, as `NSLocalizedString` returns it. For the
     /// call sites the interception does not reach: `String(localized:)`,
     /// `LocalizedStringResource`, `AttributedString(localized:)`, a `Text`
-    /// with an explicit locale, other bundles and `.stringsdict` plurals.
+    /// with an explicit locale and other bundles. For a plural it returns the
+    /// string Foundation applies the plural rules to, OTA forms or shipped.
     public static func localizedString(forKey key: String, table: String? = nil) -> String {
-        if let client = current, let ota = client.string(forKey: key), client.isSafe(key: key, table: table, ota: ota) {
-            return ota
+        let client = current
+        if let client {
+            if let plural = client.pluralString(forKey: key, table: table) { return plural }
+            if let ota = client.string(forKey: key), client.isSafe(key: key, table: table, ota: ota) { return ota }
         }
-        return Swizzle.shippedString(bundle: .main, key: key, value: nil, table: table)
+        return Swizzle.shippedString(bundle: client?.appBundle ?? .main, key: key, value: nil, table: table)
     }
 
     /// `localizedString(forKey:table:)` with `arguments` formatted in, the way
@@ -166,6 +170,8 @@ public enum LocalizeMe {
     /// with the shipped string, so its signature is part of what generated
     /// code depends on.
     public static func string(_ key: String, fallback: String) -> String {
+        // A plural the accessor looked up: the OTA forms, with their rules.
+        if let plural = current?.pluralString(forKey: key, format: fallback) { return plural }
         guard let ota = current?.string(forKey: key), FormatSpecifiers.compatible(ota, fallback) else {
             return fallback
         }

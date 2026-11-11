@@ -112,7 +112,7 @@ final class Counter {
 
     func makeClient(
         applyImmediately: Bool = false, languages: [String] = ["de-DE"], intercept: Bool = false, reportMissingKeys: Bool = false,
-        consent: LocalizeMeConsent = .full, installID: String? = "install-1"
+        consent: LocalizeMeConsent = .full, installID: String? = "install-1", appBundle: Bundle = .main
     ) -> Client {
         var configuration = LocalizeMeConfiguration(sdkKey: "lzs_test_key_1234")
         configuration.baseURL = URL(string: "https://api.test")!
@@ -123,7 +123,7 @@ final class Counter {
         configuration.consent = consent
         let client = Client(
             configuration: configuration, session: MockURLProtocol.session(for: run),
-            store: Store(root: root), installID: installID, defaults: defaults
+            store: Store(root: root), installID: installID, defaults: defaults, appBundle: appBundle
         )
         client.preferredLanguages = { languages }
         return client

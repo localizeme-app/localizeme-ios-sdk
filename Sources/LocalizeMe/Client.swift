@@ -14,12 +14,18 @@ final class Client {
     let api: API
     let reporter = Reporter()
     let queue = DispatchQueue(label: "app.localizeme.sdk")
+    /// The bundle whose lookups the SDK answers: the app's own.
+    let appBundle: Bundle
+    /// Where the OTA plural tables are written.
+    let pluralRoot: URL
     private static let queueKey = DispatchSpecificKey<Bool>()
 
     private let lock = NSLock()
     private var live: [String: String] = [:]
     private var liveLanguage: String?
     private var liveVersion = 0
+    /// The live strings' plurals, as a bundle Foundation applies rules from.
+    private var plurals: PluralTables?
     /// Bumped whenever `live` changes, so a format verdict computed against
     /// the old strings is not cached against the new ones.
     private var liveGeneration = 0
@@ -53,10 +59,15 @@ final class Client {
 
     init(
         configuration: LocalizeMeConfiguration, session: URLSession = Client.defaultSession(), store: Store? = nil,
-        installID: String? = nil, defaults: UserDefaults = .standard
+        installID: String? = nil, defaults: UserDefaults = .standard, appBundle: Bundle = .main
     ) {
         self.configuration = configuration
         let prefix = String(configuration.sdkKey.prefix(10))
+        self.appBundle = appBundle
+        // Next to an injected store, so it goes with it; else Application
+        // Support, which the system does not purge under a running app.
+        self.pluralRoot = store.map { $0.root.appendingPathComponent("plurals", isDirectory: true) }
+            ?? Client.defaultPluralRoot(keyPrefix: prefix)
         self.store = store ?? Store(root: Store.defaultRoot(keyPrefix: prefix))
         self.defaults = defaults
         self.api = API(configuration: configuration, session: session) {
@@ -72,6 +83,14 @@ final class Client {
             // queue rather than the launching thread, and before any request.
             queue.async { InstallID.remove(defaults: defaults) }
         }
+    }
+
+    private static func defaultPluralRoot(keyPrefix: String) -> URL {
+        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
+        return support.appendingPathComponent("LocalizeMe", isDirectory: true)
+            .appendingPathComponent(keyPrefix, isDirectory: true)
+            .appendingPathComponent("plurals", isDirectory: true)
     }
 
     /// No URL cache: every answer is a 304 or content the SDK stores itself.
@@ -133,6 +152,31 @@ final class Client {
         return live[key]
     }
 
+    /// The OTA plural for `key`, as the string Foundation formats with its
+    /// plural rules, when the live strings have every form it needs.
+    func pluralString(forKey key: String, table: String?) -> String? {
+        guard let plurals = livePlurals, plurals.serves(key, table: table) else { return nil }
+        return Swizzle.shippedString(bundle: plurals.bundle, key: key, value: nil, table: table)
+    }
+
+    /// `pluralString(forKey:table:)` for the attributed lookup.
+    func pluralAttributedString(forKey key: String, table: String?) -> NSAttributedString? {
+        guard let plurals = livePlurals, plurals.serves(key, table: table) else { return nil }
+        return Swizzle.shippedAttributedString(bundle: plurals.bundle, key: key, value: nil, table: table)
+    }
+
+    /// The OTA plural for a caller that looked `key` up itself and got
+    /// `format`, the shipped plural or already the OTA one.
+    func pluralString(forKey key: String, format: String) -> String? {
+        guard let plurals = livePlurals, let table = plurals.table(forKey: key, format: format) else { return nil }
+        return Swizzle.shippedString(bundle: plurals.bundle, key: key, value: nil, table: table)
+    }
+
+    private var livePlurals: PluralTables? {
+        lock.lock(); defer { lock.unlock() }
+        return plurals
+    }
+
     var version: Int {
         lock.lock(); defer { lock.unlock() }
         return liveVersion
@@ -192,7 +236,7 @@ final class Client {
         lock.unlock()
         if let cached { return cached }
 
-        let shipped = Swizzle.shippedString(bundle: .main, key: key, value: nil, table: table)
+        let shipped = Swizzle.shippedString(bundle: appBundle, key: key, value: nil, table: table)
         let verdict = FormatSpecifiers.compatible(ota, shipped)
         lock.lock()
         if liveGeneration == generation { safe[cacheKey] = verdict }
@@ -267,14 +311,25 @@ final class Client {
             }
         }
         api.language = chosen
+        let plurals = chosen.flatMap { language in
+            Plurals.build(
+                strings: strings, language: language, appBundle: appBundle, root: pluralRoot,
+                log: { self.log($0) },
+                mismatch: { key in
+                    self.reporter.recordError(LocalizeMeError(kind: .formatMismatch, message: key))
+                    self.log("placeholders of plural \"\(key)\" differ from the shipped strings; showing the shipped ones")
+                }
+            )
+        }
         lock.lock()
         live = strings
+        self.plurals = plurals
         liveLanguage = chosen
         liveVersion = version
         liveGeneration += 1
         safe = [:]
         lock.unlock()
-        log("live: \(strings.count) strings, language \(chosen ?? "-"), version \(version)")
+        log("live: \(strings.count) strings, \(plurals?.entries.values.map(\.count).reduce(0, +) ?? 0) plurals, language \(chosen ?? "-"), version \(version)")
     }
 
     // MARK: Checking
